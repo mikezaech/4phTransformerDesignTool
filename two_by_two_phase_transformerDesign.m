@@ -55,7 +55,7 @@ VoRange = [200,920];
 Pmax = 350e3/4;
 
 %% Sweep Operating range
-[OPsol, transformerAnalysis, lossStruc, Io, Vo] = opRangeSweep(converter,IoRange,VoRange,Pmax,10,10);
+[OPsol, transformerAnalysis, lossStruc, Io, Vo] = opRangeSweep(converter,IoRange,VoRange,Pmax,25,25);
 
 %% Analysis
 
