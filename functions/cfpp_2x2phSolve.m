@@ -6,10 +6,10 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
 % The phase shift is calculated numerically to fulfil KVL & KCL
 
     %% Unpack Struct
-
+    Io = Io/2;
     % Converter Parameters  
     Vi = converter.Vi; % Input Voltage
-    ph = converter.ph; % Nr. of phases
+    ph = converter.ph/2; % Nr. of phases
     fsw = converter.fsw; % Switching frequency
     Ts = 1/fsw;    
     % Transformer Data
@@ -36,7 +36,7 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
     phiMin = 1e-6;
     % Initial guess
     phi = (phiMax + phiMin)/2;
-%     phi = 0.0074;
+%     phi = 0.0018;
     while itNr < itMax
         itNr = itNr + 1;
         phiIt(itNr) = phi;
@@ -67,14 +67,10 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
         secNrOn = sum(secStates);
         % Usefull indices
         halfcycle = find(switchingInstances == 0.5);
-        quartcycle = find(switchingInstances == 0.25);
-        %% Neutral Point Voltage on secondary          
         
-        if ph == 2
-             Vn = secNrOn/ph * Vclamp;
-        else
-            Vn = [(secStates(1,:) + secStates(3,:));(secStates(2,:) + secStates(4,:)) ]./(ph/2) .* Vclamp;  % [a & c; b & d]
-        end
+       %% Neutral Point Voltage on secondary         
+%          Vn = (secStates(1,:) + secStates(3,:))/2 * Vclamp;
+         Vn = secNrOn/ph * Vclamp;
         %% Output Inductor Current
         % Time stamps
         t = switchingInstances*Ts;
@@ -89,9 +85,9 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
         IL_avg = trapz([switchingInstances, 1],[IL1, IL1(1)]);
 
         % find initial value
-        while abs(IL_avg - Io/2) > 1e-3
+        while abs(IL_avg - Io) > 1e-3
             itCnt = itCnt + 1; 
-            IL1 = IL1 + (Io/2 - IL_avg);            
+            IL1 = IL1 + (Io - IL_avg);            
             IL_avg = trapz([switchingInstances, 1],[IL1, IL1(1)]);
         
             if itCnt > 20
@@ -100,9 +96,9 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
             end
         end
 
-        % shift by 90 degrees        
-        IL2 = circshift(IL1,quartcycle - 1);       
-        ILo = IL1 + IL2;
+        % shift by 90 degrees  
+%         IL2 = circshift(IL1,quartcycle - 1);       
+        ILo = IL1;% + IL2;
         IoAvg =  mean(ILo);
 
         %% Primary Current
@@ -111,12 +107,12 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
         Vsec = (Vclamp*secStates(1,:) - Vn(1,:)); % works for voltage across secondary
         
         a1Gate = priStates(1,:);
-        c1Gate = priStates(3,:);
+        c1Gate = priStates(2,:);
         
         a2Gate = secStates(1,:);
-        c2Gate = secStates(3,:);
+        c2Gate = secStates(2,:);
         % 
-        Vlk1 =  Vi/(ph/2).*(a1Gate - a2Gate + c2Gate - c1Gate);
+        Vlk1 =  Vi/2.*(a1Gate - a2Gate + c2Gate - c1Gate);
         % Leakage voltage: reflect sec to pri:
 %         Vlk1 = Vpri - Vsec*N; %  
         dIpri = Vlk1./(Lk*N^2) .* dt;
@@ -154,15 +150,15 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
         end
         
 %% Secondary Current: Ia2 = 1/2 IL1 + Isec + Ilm
-        Ipri_c = circshift(2.*Ipri,halfcycle - 1);
+        Ipri_c = circshift(Ipri,halfcycle - 1);
         Ilm_c = circshift(Ilm,halfcycle - 1);
-        Isec_ = (Ipri_c - 2.*Ipri)*N; 
-        Ia2 = 1/ph*(IL1 + Isec_ + (Ilm - Ilm_c));
+        Isec_ = (Ipri_c - Ipri)*N; 
+        Ia2 = 0.5*(IL1 + Isec_ + (Ilm - Ilm_c));
         % Initial value (Numerically solved):
         itCnt = 0;
         Ia2_avg = trapz([switchingInstances, 1],[Ia2, Ia2(1)]);
         
-        while abs(Ia2_avg - Io/ph) > 1e-3
+        while abs(Ia2_avg - Io/2) > 1e-3
             itCnt = itCnt + 1; 
             Ia2 = Ia2  + Ia2_avg;            
             Ia2_avg = trapz([switchingInstances, 1],[Ia2, Ia2(1)]);
@@ -219,21 +215,45 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
         end
     end
 
-    
+    %% Phase shift a&c to get b&d and add for output current
+    %switchingInstances_bd
+
+    Qb1 = [0.25, D+0.25]; % [Qa1_on, Qa1_off]
+    primarySwitching_bd = mod(Qb1  + (0:1/ph:(ph-1)/ph)',1); % repeats every 1/ph, max 1
+    % Secondary
+    secondarySwitching_bd = mod(primarySwitching_bd + phi,1); % Secondary side is delayed by phase shift phi
+    % Combine
+    combinedSwitching_bd = [primarySwitching_bd;secondarySwitching_bd];
+    switchingInstances_bd = sort(reshape(combinedSwitching_bd,[1 numel(combinedSwitching_bd)])); % All the switching instances sorted by occurance
+
+    % combine 
+    switchingInstances_4ph = sort([switchingInstances, switchingInstances_bd]);
+    t_4ph = switchingInstances_4ph*Ts;
+
+   
+    % Interpolate IL1 & IL2
+    IL1_4ph = interp1(switchingInstances,IL1,switchingInstances_4ph);
+    quartcycle = find(switchingInstances_4ph == 0.25);
+    % Phase shift
+    IL2_4ph = circshift(IL1_4ph,quartcycle - 1);    
+    ILo = IL1_4ph + IL2_4ph;
+    IoAvg =  mean(ILo);
+     
     %% Output
     OPsol.itNr = itNr;
     OPsol.phiIt = phiIt;
     OPsol.phi = phi;
     OPsol.D = D;
     OPsol.switchingInstances = switchingInstances;
+    OPsol.switchingInstances_4ph = switchingInstances_4ph;
     OPsol.priStates = priStates;
     OPsol.secStates = secStates;
     OPsol.t = t;
-%     OPsol.tIL = tUnique;
+   OPsol.tIL = t_4ph;
     OPsol.IL  = ILo;
     OPsol.Vn  = Vn(1,:);
-%     OPsol.VlkSec = Vlk;
-%     OPsol.IlkSec = Ilk;
+     OPsol.IL1 = IL1_4ph;
+     OPsol.IL2 = IL2_4ph;
     OPsol.IlmSec = Ilm;
     OPsol.Ipri = Ipri;
     OPsol.Isec = IsecMatrix(1,:);
@@ -241,7 +261,7 @@ function OPsol = cfpp_2x2phSolve(converter,Vo,Io)
     OPsol.Vclamp = Vclamp;
     OPsol.Iclamp = Iclamp;
     OPsol.IclampAvg = IclampAvg;
-    OPsol.Io = Io;
+    OPsol.Io = Io*2;
     OPsol.Vo = Vo;
     OPsol.Vpri = Vpri;
     OPsol.Vsec = Vsec;
