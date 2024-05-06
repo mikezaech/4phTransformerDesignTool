@@ -1,8 +1,7 @@
 function out = two_by_two_phase_transformerDesign(input)
 setWorkingDir
 %% Unpack
-N = input.N;
-N1 = input.N1;
+
 
 
 %% Initialize
@@ -25,7 +24,13 @@ converter.Qgrid = load("components\transistors\onsemiHbSicModule_NXH006P120MNF2P
 converter.n_parGrid = [1 1];
 
 % Transformer Data
-% converter.T = transformer(n1/n2, primaryLeakage, primaryMagnetizing, configuration)
+N = input.N;
+N1 = input.N1;
+trDesign.N = 2/3;
+trDesign.Npri = 18;
+trDesign.Lk_primary =  input.Lk;
+trDesign.Lm_primary  = input.Lm;
+
 trDesign.Ac = input.Ac; % [m2] Core cross-section
 %                   % Core parameters from https://www.netl.doe.gov/sites/default/files/netl-file/Core-Loss-Datasheet---MnZn-Ferrite---N87%5B1%5D.pdf
 trDesign.k = input.k;
@@ -35,7 +40,7 @@ trDesign.MWL = input.MWL; % [m], Mean Winding Length (approximately A4 perimeter
 trDesign.Acu_pri = input.Acu_pri; % [m2] Copper diameter, 6A/mm2, 340Arms max on pri
 trDesign.Acu_sec = input.Acu_sec; % 255 Arms max on sec
 trDesign.rho = 1.77e-8; % resistivity of copper
-converter.T = defineTransformer([N1,N1/N], input.Lk, input.Lm, trDesign, '2x2'); % High Power, 2x2 optimized
+converter.T = defineTransformer(trDesign, '2x2'); % High Power, 2x2 optimized
 
 % Battery Side Transistor
 converter.Qbat = load("components\transistors\genesicDie_G3R20MT17K.mat"); % High Power
@@ -94,8 +99,8 @@ Irms4_2x2 = arrayfun(@(x) x.Irms.bat.lo,lossStruc);
 Irms_2x2 = (Irms1_2x2 + Irms2_2x2 + Irms3_2x2 + Irms4_2x2)*nrPh_2x2;
 
 
-Irms_pri_2x2 = arrayfun(@(x) x.IpriRms,transformerAnalysis)*nrPh_2x2;
-Irms_sec_2x2 = arrayfun(@(x) x.IsecRms,transformerAnalysis)*nrPh_2x2;
+Irms_pri_2x2 = arrayfun(@(x) x.IpriRms,transformerAnalysis);
+Irms_sec_2x2 = arrayfun(@(x) x.IsecRms,transformerAnalysis);
 
 
 % Bmax
@@ -103,49 +108,49 @@ Bmax = arrayfun(@(x) x.Bmax,transformerAnalysis);
 
 
 
-% %% Plot
-% 
-% figure(1)
-% tile = tiledlayout(3,2)
-% 
-% 
-% 
-% nexttile    
-% surf(Io,Vo,Pw_2ph - Pw_2x2,"FaceAlpha",0.8)
-%     hold on
-%     surf(Io,Vo,zeros(length(Io)),"FaceAlpha",0.8,"FaceColor","#000000")
-%     hold off
-%     xlabel("Output Current [A]")
-%     ylabel("Output Voltage [V]")
-%     zlabel("\Delta Winding Loss  (2ph - 2x2) [W]")
-%     title("Transformer Winding Losses")
-% 
-% nexttile    
-% surf(Io,Vo,Pcore_2ph - Pcore_2x2,"FaceAlpha",0.8)
-%     hold on
-%     surf(Io,Vo,zeros(length(Io)),"FaceAlpha",0.8,"FaceColor","#000000")
-%     hold off
-%     xlabel("Output Current [A]")
-%     ylabel("Output Voltage [V]")
-%     zlabel("\Delta Core Losses (2ph - 2x2) [W]")
-%     title("Transformer Core Losses")
-% 
-% nexttile    
-% surf(Io,Vo,PPloss_2x2,"FaceAlpha",0.8)
-%     hold off
-%     xlabel("Output Current [A]")
-%     ylabel("Total Transistor Losses[W]")
-%     title("Total Transistor Losses")
-% 
-% nexttile    
-% surf(Io,Vo,Ptot_2ph - Ptot_2x2,"FaceAlpha",0.8)
-%     hold on
-%     surf(Io,Vo,zeros(length(Io)),"FaceAlpha",0.8,"FaceColor","#000000")
-%     hold off
-%     xlabel("Output Current [A]")
-%     ylabel("Output Voltage [V]")
-%     zlabel("\Delta total losses (2ph - 2x2) [W]")
-%     title("Total  Losses")
+%% Plot
+
+figure(1)
+tile = tiledlayout(2,2)
+
+
+
+nexttile    
+surf(Io,Vo, Pw_2x2,"FaceAlpha",0.8)
+    hold on
+    surf(Io,Vo,zeros(length(Io)),"FaceAlpha",0.8,"FaceColor","#000000")
+    hold off
+    xlabel("Output Current [A]")
+    ylabel("Output Voltage [V]")
+    zlabel("Winding Losses [W]")
+    title("Transformer Winding Losses")
+
+nexttile    
+surf(Io,Vo,Pcore_2x2,"FaceAlpha",0.8)
+    hold on
+    surf(Io,Vo,zeros(length(Io)),"FaceAlpha",0.8,"FaceColor","#000000")
+    hold off
+    xlabel("Output Current [A]")
+    ylabel("Output Voltage [V]")
+    zlabel("Core Losses [W]")
+    title("Transformer Core Losses")
+
+nexttile    
+surf(Io,Vo,Ploss_2x2,"FaceAlpha",0.8)
+    hold off
+    xlabel("Output Current [A]")
+    ylabel("Total Transistor Losses[W]")
+    title("Total Transistor Losses")
+
+nexttile    
+surf(Io,Vo,Ptot_2x2,"FaceAlpha",0.8)
+    hold on
+    surf(Io,Vo,zeros(length(Io)),"FaceAlpha",0.8,"FaceColor","#000000")
+    hold off
+    xlabel("Output Current [A]")
+    ylabel("Output Voltage [V]")
+    zlabel("Total losses 2x2 [W]")
+    title("Total  Losses")
 % title(tile," Compare  two-phase vs 2x2-phase")
 % %% Compare 2ph vs. four phase
 % figure(2)
@@ -279,7 +284,7 @@ Bmax = arrayfun(@(x) x.Bmax,transformerAnalysis);
 % title(tile,"Comparison of transformer RMS current for different topologies")
  %% 
 
-[areaHot_tot_2x2, nTransistors_2x2, IrmsMax_2x2, figureCount] = pushPullSoaAnalysis(converter,lossStruc,Io,Vo,Pmax,1);
+[areaHot_tot_2x2, nTransistors_2x2, IrmsMax_2x2, figureCount] = pushPullSoaAnalysis(converter,lossStruc,Io,Vo,Pmax,2);
 
 out.Vmax_pri = converter.Vi;
 out.Vmax_sec = converter.Vclamp;
