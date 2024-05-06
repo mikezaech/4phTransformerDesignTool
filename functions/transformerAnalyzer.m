@@ -32,8 +32,12 @@ function transformerAnalysis = transformerAnalyzer(converter,OPsol)
     Vsec_pk = max(abs(Vsec));
     
     % RMS Current    
-    IpriRms = sqrt(converter.fsw * trapz([time, 1/converter.fsw],[Ipri, Ipri(1)].^2));
-    IsecRms = sqrt(converter.fsw * trapz([time, 1/converter.fsw],[Isec, Isec(1)].^2));
+    % Add zero crossings
+    [Ipri_ZC_time,Ipri_ZC] = addZeroCrossing(time,Ipri);
+    [Isec_ZC_time,Isec_ZC] = addZeroCrossing(time,Isec);
+
+    IpriRms = sqrt(converter.fsw * trapz([Ipri_ZC_time, 1/converter.fsw],[Ipri_ZC, Ipri_ZC(1)].^2));
+    IsecRms = sqrt(converter.fsw * trapz([Isec_ZC_time, 1/converter.fsw],[Isec_ZC, Isec_ZC(1)].^2));
     
     % Core Losses
     % Bmax
