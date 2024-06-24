@@ -31,14 +31,14 @@ function OPsol = currentFedPushPullSolve(converter,Vo,Io)
     % Max Iterations to find phi 
     itMax = 200;
     itNr = 0; % Initialize
-    errMax = 1e-3; % max deviation of clamp current
+    errMax = 2e-3; % max deviation of clamp current
     
     % Phase shift limits
     phiMax = 1/ph;
     phiMin = 1e-6;
     % Initial guess
     phi = (phiMax + phiMin)/2;
-    
+%     phi = 0.0174;
     while itNr < itMax
         itNr = itNr + 1;
         phiIt(itNr) = phi;
@@ -75,15 +75,39 @@ function OPsol = currentFedPushPullSolve(converter,Vo,Io)
         t = switchingInstances*Ts;
         % Voltage across output inductor
         VL = Vn - Vo;        
-        % Only consider timestamps with unique voltage value
-        VLuniqueIdx = [1, diff(VL)] ~= 0;
-        VLunique = VL(VLuniqueIdx);
-        tUnique = t(VLuniqueIdx);
-        dtUnique =  [tUnique(2:end),Ts] - tUnique;
+%         % Only consider timestamps with unique voltage value
+%         VLuniqueIdx = [1, diff(VL)] ~= 0;
+%         VLunique = VL(VLuniqueIdx);
+%         tUnique = t(VLuniqueIdx);
+%         dtUnique =  [tUnique(2:end),Ts] - tUnique;
+%         
+%         % Inductor Equation
+%         dIL = VLunique./Lo.*dtUnique;
+%         IL = Io - dIL;
+
+        dt = [t(2:end),Ts] - t;
+
+        % Voltage across inductor
+        VL(1,:) = Vn(1,:) - Vo;
+        dIL = VL(1,:)./Lo.*dt;
+        IL1 = [0, cumsum(dIL(1:end-1))];
+
+        itCnt = 0;
+        IL_avg = trapz([switchingInstances, 1],[IL1, IL1(1)]);
+
+        % find initial value
+        while abs(IL_avg - Io) > 1e-3
+            itCnt = itCnt + 1; 
+            IL1 = IL1 + (Io - IL_avg);            
+            IL_avg = trapz([switchingInstances, 1],[IL1, IL1(1)]);
         
-        % Inductor Equation
-        dIL = VLunique./Lo.*dtUnique;
-        IL = Io - dIL;
+            if itCnt > 20
+                error("did not CONVERGE ")
+                break
+            end
+        end     
+        IL = IL1;% + IL2;
+        IoAvg =  mean(IL);
         
         %% Leakage voltage
         % Auxiliary voltages
@@ -95,36 +119,24 @@ function OPsol = currentFedPushPullSolve(converter,Vo,Io)
         %% Transformer Currents
         % Time steps 
         dt =  [t(2:end),Ts] - t;    
-        % Magnetizing Inductance
+        %% Magnetizing Inductance
         Vlm = (secStates(1,:)*Vclamp) - Vn;     
         dIlm = Vlm./Lm.*dt;
-        Ilm_ = [0 cumsum(dIlm(1:end-1))]; % Starting from 0
-        % Find Initial value Numerically: 
+         Ilm = [0 cumsum(dIlm(1:end-1))]; % Starting from 0
+        % Initial value (Numerically solved):
+        itCnt = 0;
+        Ilm_avg = trapz([switchingInstances, 1],[Ilm, Ilm(1)]);
         
-        Ilm = Ilm_;
-        IlmMatrix = uniformPhaseDelay(Ilm,switchingInstances,ph);
-%         IlmMatrix(1,:) = Ilm;
-%             for nPh = 2:ph % Shift it by 1/ph
-%                    phIdx = find(switchingInstances == (nPh - 1)/ph);
-%                    IlmMatrix(nPh,:) = circshift(Ilm,phIdx-1);    
-%             end
-        IlmSum = sum(IlmMatrix);
-        IlmAvg = trapz(switchingInstances,IlmSum);
+        while abs(Ilm_avg) > 1e-3
+            itCnt = itCnt + 1; 
+            Ilm = Ilm  - Ilm_avg;            
+            Ilm_avg = trapz([switchingInstances, 1],[Ilm, Ilm(1)]);
         
-        % Iterative Solution
-        itNrIlm = 0;
-        maxItNrIlm = 10;
-        maxErr = 0.001;
-        while abs(Io - IlmAvg) >= maxErr % Average of sum of all currents equals to Io
-            itNrIlm = itNrIlm + 1;
-            Ilm = Ilm + (Io - IlmAvg)/ph;
-            IlmMatrix = uniformPhaseDelay(Ilm,switchingInstances,ph);
-            IlmSum = sum(IlmMatrix);        
-            IlmAvg = trapz(switchingInstances,IlmSum);
-            if itNrIlm > maxItNrIlm
+            if itCnt > 20
                 break
             end
         end
+        %%
 
         % Delta Current through leakage inductance
         dIlk = -Vlk/Lk.*dt;
@@ -133,13 +145,13 @@ function OPsol = currentFedPushPullSolve(converter,Vo,Io)
         Ilk_ = [0 cumsum(dIlk(1:end-1))]; % Referred from secondary  
         % Find average current and use as initial value
         IlkAvg = trapz(switchingInstances,Ilk_);    
-        Ilk = Ilk_  - IlkAvg;
+        Ilk = Ilk_  - IlkAvg ;
     
         % Reflect to primary side
         IlkPri = [0 cumsum(dIlk(1:end-1)/N)] - IlkAvg/N;
     
         % Secondary Current
-        Isec = -Ilk + Ilm; 
+        Isec = -Ilk + Ilm + Io/ph; 
         IsecMatrix = uniformPhaseDelay(Isec,switchingInstances,ph);
         
         %% Clamp Current: Iclamp = - sum(Isec * secState), mean(Iclamp) == 0
@@ -159,7 +171,8 @@ function OPsol = currentFedPushPullSolve(converter,Vo,Io)
             break
         end
         if itNr == itMax
-            error("solution did not CONVERGE")
+            warning("solution did not CONVERGE")
+            phi = 1;
         end
     end
 
@@ -173,10 +186,11 @@ function OPsol = currentFedPushPullSolve(converter,Vo,Io)
     OPsol.priStates = priStates;
     OPsol.secStates = secStates;
     OPsol.t = t;
-    OPsol.tIL = tUnique;
+    OPsol.tIL = t;
     OPsol.IL  = IL;
     OPsol.Vn  = Vn;
     OPsol.VlkSec = Vlk;
+    OPsol.VlkPri = Vlk*N;
     OPsol.IlkSec = Ilk;
     OPsol.IlmSec = Ilm;
     OPsol.Ipri = IlkPri;

@@ -113,7 +113,8 @@ function [optRun, xOpt] = fourPhaseOptimizer(converter,optVar,xMin,xMax)
         % Update variable
         % If is in transformer:
         if contains(optVar,'Lm') == 1 
-            converter.T = transformer(converter.T.N, x*0.01,x,converter.T.config);       
+            converter.T.design.Lm_primary = x;
+            converter.T = defineTransformer(converter.T.design, converter.T.config);       
         else
             converter.(optVar) = x;
             % Clamp Voltage Update:
@@ -127,31 +128,131 @@ function [optRun, xOpt] = fourPhaseOptimizer(converter,optVar,xMin,xMax)
         Pmax = 350e3/4;
         
         %% Sweep Operating range
-        [OPsol, lossStruc, Io, Vo] = opRangeSweep(converter,IoRange,VoRange,Pmax,25,25);
+        [OPsol, transformerAnalysis, lossStruc, Io, Vo] = opRangeSweep(converter,IoRange,VoRange,Pmax,25,25);
         
-        %%
-        PlossGridHi = arrayfun(@(x) x.Ploss.grid.hi,lossStruc);
-        PlossBatHi = arrayfun(@(x) x.Ploss.bat.hi,lossStruc);
-        PlossGridLo = arrayfun(@(x) x.Ploss.grid.lo,lossStruc);
-        PlossBatLo = arrayfun(@(x) x.Ploss.bat.lo,lossStruc);
+        %% Transistor losses
+        PqGridHi = arrayfun(@(x) x.Ploss.grid.hi,lossStruc);
+        PqBatHi = arrayfun(@(x) x.Ploss.bat.hi,lossStruc);
+        PqGridLo = arrayfun(@(x) x.Ploss.grid.lo,lossStruc);
+        PqBatLo = arrayfun(@(x) x.Ploss.bat.lo,lossStruc);
+        transistorLossSpread =  max([PqGridHi, PqBatHi,PqGridLo,PqBatLo],[],'all') - min([PqGridHi, PqBatHi,PqGridLo,PqBatLo],[],'all');
         
-        lossSpread =  max([PlossGridHi, PlossBatHi,PlossGridLo,PlossBatLo],[],'all') - min([PlossGridHi, PlossBatHi,PlossGridLo,PlossBatLo],[],'all');
+        % Transformer RMS currents
+        IrmsPri = arrayfun(@(x) x.IpriRms,transformerAnalysis);
+        IrmsSec = arrayfun(@(x) x.IsecRms,transformerAnalysis);
+        % Transformer losses
+        Pcore = arrayfun(@(x) x.Pcore,transformerAnalysis);
+        Pwinding = arrayfun(@(x) x.Pw,transformerAnalysis);
+
+        Ptransformer = Pcore + Pwinding;
+       
         % OPs within defined Output Range
         pointsRange = Io.*Vo <= Pmax;
     
         % Weighting Voltages above 600V more:
-        weight = 0.5; % 20 %
-        weightPoints = 1 + (Vo >= 600)*weight;
-        PlossSum_HPC = sum((PlossGridHi + PlossBatHi + PlossBatLo + PlossGridLo).*pointsRange*weightPoints,'all');
+        weight = 10; % 20 %
+        weightPoints = 1 + (or(Vo >= 800, and(Io >= 100, Vo >= 600)))*weight;
+        PlossSum_HPC = sum((PqGridHi + PqBatHi + PqBatLo + PqGridLo + Ptransformer).*pointsRange*weightPoints,'all');
         loss = PlossSum_HPC;
         %% Safe Operating Range Analysis
         [areaHot_tot, nTransistors, IrmsMax, figureCount] = pushPullSoaAnalysis(converter,lossStruc,Io,Vo,Pmax,1);
-        disp("SOA: " + num2str(1 - areaHot_tot))
-        disp("Max RMS Current: " + num2str(max(IrmsMax)))
+        tiledContour(Io,Vo,PqGridHi,PqBatHi,PqGridLo,PqBatLo,"Losses [W]","Transistor Losses",figureCount)
+        figureCount = figureCount + 1;
+
+
+   
+        figure(figureCount)
+        figureCount = figureCount + 1;
+         t = tiledlayout(1,2,'TileSpacing','Compact');
+         ax(1) = nexttile
+          contourf(Io,Vo,Pcore);          
+              title("Core Losses")
+              xlabel("Output Current [A]")
+              ylabel("Output Voltage [V]")
+              zlabel("Losses [W]")
+                  z_boundary(1,:) =  [min(Pcore,[],'all'), max(Pcore,[],'all')];
+              grid on
         
+         ax(2) = nexttile
+        contourf(Io,Vo,Pwinding);
+              grid on
+              title("Winding Losses")
+        
+              xlabel("Output Current [A]")
+              ylabel("Output Voltage [V]")
+              zlabel("Losses [W]")
+                  z_boundary(2,:) = [min(Pwinding,[],'all'), max(Pwinding,[],'all')];
+        
+        % General
+               
+              title("Transformer Losses")         
+              % Make Z limits equal
+                  intSpacer = 1; % Round up to nearest value (e.g. 420 -> 450)
+                  z_max = ceil(max(z_boundary,[],'all')/intSpacer)*intSpacer;
+                  zlim(ax(1),[0, z_max]);
+                  zlim(ax(2),[0, z_max]);
+        
+              % Add colorbar
+        cb = colorbar(ax(end));
+        ylabel(cb,"Losses [W]",'FontSize',12);
+             set(ax, 'Colormap', brighten(hot(1000),0.8), 'CLim',[0, z_max + z_max*0.1]);
+        cb.Layout.Tile = 'east'; 
+        hold off
+
+    figure(figureCount)
+        figureCount = figureCount + 1;
+        t = tiledlayout(1,2,'TileSpacing','Compact');
+        ax(1) = nexttile
+        contourf(Io,Vo,IrmsPri);          
+              title("Primary Side RMS Current")
+              xlabel("Output Current [A]")
+              ylabel("Output Voltage [V]")
+              zlabel("Current [A]")
+                  z_boundary(1,:) =  [min(IrmsPri,[],'all'), max(IrmsPri,[],'all')];
+              grid on
+        
+         ax(2) = nexttile
+        contourf(Io,Vo,IrmsSec);
+              grid on
+              title("Secondary Side RMS Current")
+        
+              xlabel("Output Current [A]")
+              ylabel("Output Voltage [V]")
+              zlabel("Current [A]")
+                  z_boundary(2,:) = [min(IrmsSec,[],'all'), max(IrmsSec,[],'all')];
+        
+        % General
+               
+              title("Transformer RMS Currents")         
+              % Make Z limits equal
+                  intSpacer = 1; % Round up to nearest value (e.g. 420 -> 450)
+                  z_max = ceil(max(z_boundary,[],'all')/intSpacer)*intSpacer;
+                  zlim(ax(1),[0, z_max]);
+                  zlim(ax(2),[0, z_max]);
+        
+              % Add colorbar
+        cb = colorbar(ax(end));
+        ylabel(cb,"Current [A]",'FontSize',12);
+             set(ax, 'Colormap', brighten(hot(1000),0.8), 'CLim',[0, z_max + z_max*0.1]);
+        cb.Layout.Tile = 'east'; 
+        hold off
+        %%
+     
+        disp("SOA: " + num2str(1 - areaHot_tot))
+        disp("Max Transistor RMS Current: " + num2str(max(IrmsMax)))
+        
+        opt.lossValues.PqGridHi = PqGridHi;
+        opt.lossValues.PqBatHi = PqBatHi;
+        opt.lossValues.PqGridLo = PqGridLo;
+        opt.lossValues.PqBatLo = PqBatLo;
+        opt.lossValues.Pq_tot = PqGridHi + PqBatHi + PqGridLo + PqBatLo;
+        opt.lossValues.Pcore = Pcore;
+        opt.lossValues.Pwinding = Pwinding;
+        opt.lossValues.Ptransformer = Ptransformer;        
+
         opt.xVal = x;
         opt.loss = loss;
-        opt.lossSpread = lossSpread;
+        opt.lossSpread = transistorLossSpread;
         opt.soa = 1 - areaHot_tot;
         opt.rmsMax = IrmsMax;
         opt.nTransistors = nTransistors;

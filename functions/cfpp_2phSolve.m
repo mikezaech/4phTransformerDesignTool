@@ -36,7 +36,7 @@ function OPsol = cfpp_2phSolve(converter,Vo,Io)
     phiMin = 1e-6;
     % Initial guess
     phi = (phiMax + phiMin)/2;
-%     phi = 0.0074;
+    phi = 7.5773e-04;
     while itNr < itMax
         itNr = itNr + 1;
         phiIt(itNr) = phi;
